@@ -1,1 +1,333 @@
-## placeholder
+### case milano
+
+rm(list=ls())
+gc()
+library(readxl)
+library(dplyr)
+
+mappe <- read_xlsx("C:/Users/Gianmarco/Downloads/mappe.xlsx")
+head(mappe)
+dati <- read.csv("C:/Users/Gianmarco/Downloads/casemilano.csv", stringsAsFactors = T)
+
+
+
+### PULIZIA DEL DATASET 
+
+table(mappe$zona)
+table(dati$zona)
+mappe$zona=ifelse(mappe$zona == 'citt√† studi', 'città studi', mappe$zona)
+
+str(dati)
+table(dati$s)
+dati$s=dati$w=NULL
+table(dati$ascensore)
+dati$ascensore=ifelse(dati$ascensore=='no', 'no', 'si')
+table(dati$numero.bagni)
+dati$numero.bagni=ifelse(dati$numero.bagni==1 | dati$numero.bagni==2, dati$numero.bagni, '3+')
+dati$numero.stanze=ifelse(dati$numero.stanze==5 | dati$numero.stanze=='5+', '5+', dati$numero.stanze)
+dati$numero.bagni=factor(dati$numero.bagni)
+dati$numero.stanze=factor(dati$numero.stanze)
+table(dati$numero.stanze)
+table(dati$numero.totale.piani.edificio)
+dati$numero.totale.piani.edificio=ifelse(dati$numero.totale.piani.edificio=='1 piano', 1, dati$numero.totale.piani.edificio)
+dati$numero.totale.piani.edificio=ifelse(dati$numero.totale.piani.edificio>15, '15+', ifelse(dati$numero.totale.piani.edificio>10, '11-15', ifelse(dati$numero.totale.piani.edificio>5, ' 6-10', '1-6')))
+table(dati$numero.totale.piani.edificio)
+dati$numero.totale.piani.edificio=factor(dati$numero.totale.piani.edificio)
+
+table(dati$parcheggio)
+dati$parcheggio=ifelse(dati$parcheggio=='no', 'no', 'si')
+dati$parcheggio=factor(dati$parcheggio)
+
+table(dati$disponibile)
+dati$disponibile=as.character(dati$disponibile)
+dati$disponibile=ifelse(dati$disponibile=='disponibile', 'disponibile', ifelse(grepl('2023', dati$disponibile), '2023', 
+                                                                               ifelse(grepl('2024', dati$disponibile), '2024',
+                                                                                      ifelse(grepl('2025', dati$disponibile), '2025', '2026+'))))
+table(dati$disponibile)
+dati$disponibile=factor(dati$disponibile)
+
+dati$spese.condominiali=ifelse(dati$spese.condominiali=='nessun costo condominiale', 0, dati$spese.condominiali)
+str(dati$spese.condominiali)
+dati$anno.di..Costruzione=as.numeric(dati$anno.di..Costruzione)
+dati$zona=as.character(dati$zona)
+table(dati$piano)
+dati$piano=ifelse(dati$piano==7|dati$piano==8|dati$piano==9, '7+', dati$piano)
+dati$piano=factor(dati$piano)
+table(dati$classe.di.efficienza.energetica)
+dati$classe.di.efficienza.energetica=ifelse(dati$classe.di.efficienza.energetica=='f'|dati$classe.di.efficienza.energetica=='g', 'molto bassa', dati$classe.di.efficienza.energetica)
+dati$classe.di.efficienza.energetica=factor(dati$classe.di.efficienza.energetica)
+table(dati$classe.di.efficienza.energetica)
+
+
+dati$altre.caratteristiche=as.character(dati$altre.caratteristiche)
+dati$terrazza=ifelse(grepl('terrazza', dati$altre.caratteristiche), 1, 0)
+table(dati$fibra)
+head(dati$altre.caratteristiche)
+dati$fibra=ifelse(grepl('fibra ottica', dati$altre.caratteristiche), 1, 0)
+dati$porta_sicurezza=ifelse(grepl('porta di sicurezza', dati$altre.caratteristiche), 1, 0)
+dati$terrazza=factor(dati$terrazza)
+dati$fibra=factor(dati$fibra)
+dati$porta_sicurezza=factor(dati$porta_sicurezza)
+dati$piscina=ifelse(grepl('piscina', dati$altre.caratteristiche), 1, 0)
+dati$piscina=factor(dati$piscina)
+dati$altre.caratteristiche=NULL
+
+
+na_cnt=apply(dati, 2, function(x) sum(is.na(x)))
+
+
+# imputazione NA nel numero di bagni
+library(ranger)
+na_idx=which( is.na(dati$numero.bagni))
+rf=ranger( factor(numero.bagni)~metri.quadrati, data=dati[-na_idx, ], probability = F)
+for(i in 1:nrow(dati)){
+  if(is.na(dati$numero.bagni[i])){
+    dati$numero.bagni[i]=as.character(predict(rf, dati[i,])$predictions)
+  }
+}
+
+# imputazione ascensore
+na_idx=which( is.na(dati$ascensore))
+dati$ascensore[na_idx]='Non conosciuto'
+str(dati$ascensore)
+dati$ascensore=factor(dati$ascensore, levels=c('si', 'no', 'Non conosciuto'))
+
+
+# imputiamo l'anno di costruzione
+imput_x10=lm(anno.di..Costruzione~  metri.quadrati+numero.bagni+ascensore+numero.stanze, data=dati)
+id_anni=which(is.na(dati$anno.di..Costruzione))
+dati$anno.di..Costruzione[id_anni] <- predict(imput_x10, newdata = dati[id_anni, ])
+
+dati$anno.di..Costruzione=round(dati$anno.di..Costruzione, 0)
+
+sum(is.na(dati$anno.di..Costruzione))
+
+
+# imputazione spese condominiali
+imput_x10=lm(spese.condominiali~  metri.quadrati+numero.bagni+ascensore+numero.stanze, data=dati)
+dati$spese.condominiali=ifelse(is.na(dati$spese.condominiali), predict(imput_x10, newdata=dati), dati$spese.condominiali)
+sum(is.na(dati$spese.condominiali))
+
+na_cnt=apply(dati, 2, function(x) sum(is.na(x)))
+
+# classe efficienza energetica
+livelli_efficienza <- levels(dati$classe.di.efficienza.energetica)
+classe_char <- as.character(dati$classe.di.efficienza.energetica)
+classe_char[is.na(classe_char)] <- "Non conosciuta"
+dati$classe.di.efficienza.energetica <- factor(classe_char,
+                                               levels = c(livelli_efficienza, "Non conosciuta"))
+
+
+# condizioni appartamento
+livelli_condizioni <- levels(dati$condizioni)
+condizioni_char <- as.character(dati$condizioni)
+condizioni_char[is.na(condizioni_char)] <- "Non conosciuta"
+dati$condizioni <- factor(condizioni_char,
+                          levels = c(livelli_condizioni, "Non conosciuta"))
+
+
+# RISCALDAMENTO CENTRALIZZATO
+livelli_riscaldamento <- levels(dati$riscaldamento.centralizzato)
+riscaldamento_char <- as.character(dati$riscaldamento.centralizzato)
+riscaldamento_char[is.na(riscaldamento_char)] <- "Non conosciuta"
+dati$riscaldamento.centralizzato <- factor(riscaldamento_char,
+                                           levels = c(livelli_riscaldamento, "Non conosciuta"))
+
+
+# disponibilita
+livelli_disponibile <- levels(dati$disponibile)
+disponibile_char <- as.character(dati$disponibile)
+disponibile_char[is.na(disponibile_char)] <- "Non conosciuta"
+dati$disponibile <- factor(disponibile_char,
+                           levels = c(livelli_disponibile, "Non conosciuta"))
+
+table(dati$classe.di.efficienza.energetica)
+
+sum(is.na(dati))
+dati=na.omit(dati)
+
+
+dati2=full_join(dati, mappe,by='zona' )
+dati2[1, ]
+dati2= dati2[-(12689:12692),]
+
+dati2$città=NULL
+table(dati2$condizioni)
+str(dati2)
+sort(table(dati2$zona))
+# Per alcune zone ho poche osservazioni, ma sfrutto la longitudine e latitudine
+dati2$zona=NULL
+str(dati2)
+dati2$ascensore=factor(dati2$ascensore)
+
+
+
+
+
+
+
+
+####      MODELLAZIONE 
+
+set.seed(1)
+idx=sample(1:nrow(dati2), nrow(dati2)*0.65)
+stima=dati2[idx, ]
+verifica=dati2[-idx, ]
+
+
+# modello lineare stepback per AIC
+m0=lm(prezzo~., data=stima)
+# prezzo ~ metri.quadrati + numero.bagni + ascensore + numero.stanze + 
+#   numero.totale.piani.edificio + parcheggio + disponibile + 
+#   spese.condominiali + anno.di..Costruzione + condizioni + 
+#   piano + riscaldamento.centralizzato + classe.di.efficienza.energetica + 
+#   terrazza + porta_sicurezza + Latitudine + Longitudine
+m.step=step(m0)
+pred_lin_no_int=predict(m0, verifica)
+sum(is.na(pred_lin_no_int))
+mse_lin_no_int=mean( (pred_lin_no_int-verifica$prezzo)^ 2, na.rm=T)
+
+
+
+# lasso con interazioni (stima-convalida)
+set.seed(1)
+cb1=sample(1:nrow(stima), nrow(stima)*0.6)
+cb2=setdiff(1:nrow(stima), cb1)
+length(cb1)
+dim(stima)
+x=model.matrix(~(.)^2, data=stima[, -1])
+x.vvv=model.matrix(~(.)^2, data=verifica[, -1])
+dim(x)
+library(glmnet)
+mod.lasso = glmnet(x[cb1,-1], stima$prezzo[cb1], alpha=0)
+par(mfrow = c(1,2))
+plot(mod.lasso, xvar="lambda", label=TRUE, 'Coefficienti Lasso al variare di lambda')
+plot(mod.lasso, xvar="norm", label=TRUE) 
+
+p.lasso = predict(mod.lasso, newx=x[cb2, -1])
+err.lasso = apply((stima$prezzo[cb2] - p.lasso)^2, 2, mean)
+plot(log(mod.lasso$lambda),err.lasso, ylab='Errori', main='Errore quadratico medio di previsione al variare di lambda')
+# Zoom dove ha senso
+plot(log(mod.lasso$lambda),err.lasso, ylim = c(5e10, 6e10))
+lambda.ottimo.lasso = mod.lasso$lambda[which.min(err.lasso)]
+abline(v = log(lambda.ottimo.lasso), col = 2, lwd = 2)
+m.lasso<<- coef(mod.lasso, s = lambda.ottimo.lasso)
+pred.lasso = predict(mod.lasso,newx = x.vvv[,-1], s = lambda.ottimo.lasso)
+
+mse_lasso <<- mean((pred.lasso-verifica$prezzo)^2)
+mse_lin_no_int
+sqrt(mse_lasso)
+boxplot(dati2$prezzo)
+summary(dati2$prezzo)
+
+
+
+
+# Albero
+library(tree)
+mt = tree(prezzo~.,
+          data = stima[cb1,],
+          control = tree.control(nobs=length(cb1), 
+                                 minsize=2, mindev=0.0001))
+plot(mt) 
+
+tm = prune.tree(mt, newdata = stima[cb2,])
+plot(tm)
+J = tm$size[which.min(tm$dev)]
+abline(v = J, col = 2)
+
+m_tree = prune.tree(mt, best = J)
+plot(m_tree)
+text(m_tree, cex = 0.7)
+pr_tree = predict(m_tree, verifica)
+mse.tree2 <<- mean( (pr_tree - verifica$prezzo)^2 )
+log(mse.tree2)
+rm(x)
+rm(x.vvv)
+rm(dati)
+rm(imput_x10)
+sort(sapply(ls(), function(x) object.size(get(x))), decreasing = TRUE)
+
+
+
+
+# Random forest
+library(ranger)
+mtry_val = c(10,12,15, 19)
+alberi_val = seq(50, 2000, by = 100)
+rf_err = matrix(NA, length(alberi_val), length(mtry_val))
+set.seed(1)
+for(v in 1:length(mtry_val)){
+  for(a in  1:length(alberi_val)) {
+    tmp = ranger(prezzo ~ . , 
+                 data=stima, mtry = mtry_val[v],      # per velocita' si puo' selezionare casualmente alcune unita' invece che stimare sulla stima completa
+                 num.trees = alberi_val[a])
+    rf_err[a,v] = tmp$prediction.error
+  }
+  cat(v, "\n")
+}
+matplot(alberi_val, rf_err, type = "l", lwd = 2)
+legend("topright", col = 1:3, lty = 1:3, legend = mtry_val)
+# Il migliore ha 12 variabili ad ogni split, e a 1500 iterazioni non sembra ancora stabile
+mrf = ranger(prezzo ~ . , data=stima, mtry = 12,
+             num.trees = 1800, importance = 'impurity')
+plot(c(rf_err[,1], mrf$prediction.error), type = 'l')
+v_imp = sort(importance(mrf))
+dotchart(sqrt(v_imp))
+prf =(predict(mrf, verifica)$prediction)
+mse_rand.for = mean((prf-verifica$prezzo)^2)
+log(mse_rand.for)
+
+rm(mrf)
+rm(tmp)
+rm(mod.lasso)
+rm(mt)
+rm(m_tree)
+
+log(cbind(mse_lin_no_int, mse_lasso, mse.tree2, mse_rand.for))
+
+
+# PPR
+err = rep(NA,9)
+for(it in 1:9){
+  tmp = ppr(prezzo ~ . , data=stima[cb1, ],nterms = it)
+  err[it] =  mean( (stima$prezzo[cb2] -  predict(tmp, stima[cb2,]))^2)
+  cat(it, "\n")
+}
+plot(1:9, err, main = "Errore di previsione",
+     ylab = "Errore quadratico medio",
+     xlab = "Numero di funzioni dorsali")
+
+mppr =  ppr(prezzo ~ . , data=stima,nterms = 7)
+summary(mppr)
+par(mfrow = c(1,2))
+plot(mppr)
+
+pmppr1 = (predict(mppr, newdata=verifica))
+mse_ppr =  mean((pmppr1-verifica$prezzo)^2)
+log(mse_ppr)
+
+
+
+
+
+
+## Gradient Boost
+library(gbm)
+
+gbm_fit <- gbm(prezzo ~ ., 
+               data = stima, 
+               distribution = "gaussian",
+               n.trees = 3000,
+               interaction.depth = 3,
+               shrinkage = 0.01,
+               n.minobsinnode = 10,
+               verbose = FALSE)
+
+best_iter <- gbm.perf(gbm_fit, method = "OOB", plot.it = TRUE)
+pred_gbm <- predict(gbm_fit, newdata = verifica, n.trees = best_iter)
+mse_gbm <- mean((verifica$prezzo - pred_gbm)^2)
+mse_gbm
+
+
+
