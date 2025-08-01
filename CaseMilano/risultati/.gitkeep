@@ -1,1 +1,117 @@
-place holder
+library(shiny)
+library(leaflet)
+
+modello_rf <- readRDS("modello_rf.rds")  # Carico modello Random Forest
+
+ui <- fluidPage(
+  tags$head(
+    tags$style(HTML("
+    input[type='number']:focus {
+      border: 2px solid red !important;
+      outline: none !important;
+    }
+  "))
+  ),
+  
+  titlePanel("Predizione prezzo case Milano"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      numericInput("metri.quadrati", "Metri quadrati", value = 75, min = 10, max = 500),
+      numericInput("Latitudine", "Latitudine", value = 45.4642, min = 44, max = 46, step = 0.0001),
+      numericInput("Longitudine", "Longitudine", value = 9.19, min = 8, max = 10, step = 0.0001),
+      selectInput("numero.bagni", "Numero bagni", choices = c("1", "2", "3+")),
+      selectInput("ascensore", "Ascensore", choices = c("si", "no", "Non conosciuto")),
+      selectInput("numero.stanze", "Numero stanze", choices = c("1", "2", "3", "4", "5+")),
+      selectInput("numero.totale.piani.edificio", "Totale piani edificio", choices = c(" 6-10", "1-6", "11-15", "16+")),
+      selectInput("parcheggio", "Parcheggio", choices = c("no", "si")),
+      selectInput("disponibile", "Disponibile", choices = c("2023", "2024", "2025", "2026", "2027", "2028")),
+      numericInput("spese.condominiali", "Spese condominiali (€/mese)", value = 100, min = 0),
+      numericInput("anno.di..Costruzione", "Anno di costruzione", value = 1970, min = 1800, max = 2025),
+      selectInput("condizioni", "Condizioni", choices = c(
+        "buone condizioni /vivibile",
+        "ottime condizioni /ristrutturato",
+        "da ristrutturare",
+        "nuova costruzione",
+        "altro"
+      )),
+      selectInput("piano", "Piano", choices = as.character(1:15)),
+      selectInput("riscaldamento.centralizzato", "Riscaldamento centralizzato", choices = c("centralizzato", "autonomo", "nessuno")),
+      selectInput("classe.di.efficienza.energetica", "Classe di efficienza energetica", choices = as.character(1:8)),
+      selectInput("terrazza", "Terrazza", choices = c("0","1")),
+      selectInput("fibra", "Fibra", choices = c("0","1")),
+      selectInput("porta_sicurezza", "Porta sicurezza", choices = c("0","1")),
+      selectInput("piscina", "Piscina", choices = c("0","1")),
+      actionButton("predici", "Predici prezzo")
+    ),
+    
+    mainPanel(
+      leafletOutput("mappaMilano", height = 600),
+      br(),
+      h3(textOutput("prezzo_predetto"))
+    )
+  )
+)
+
+
+server <- function(input, output, session) {
+  
+  predizione <- eventReactive(input$predici, {
+    newdata <- data.frame(
+      metri.quadrati = as.numeric(input$metri.quadrati),
+      numero.bagni = factor(input$numero.bagni, levels = c("1", "2", "3+")),
+      ascensore = factor(input$ascensore, levels = c("si", "no", "Non conosciuto")),
+      numero.stanze = factor(input$numero.stanze, levels = c("1", "2", "3", "4", "5+")),
+      numero.totale.piani.edificio = factor(input$numero.totale.piani.edificio, levels = c(" 6-10", "1-6", "11-15", "16+")),
+      parcheggio = factor(input$parcheggio, levels = c("no", "si")),
+      disponibile = factor(input$disponibile, levels = c("2023", "2024", "2025", "2026", "2027", "2028")),
+      spese.condominiali = as.numeric(input$spese.condominiali),
+      anno.di..Costruzione = as.numeric(input$anno.di..Costruzione),
+      condizioni = factor(input$condizioni, levels = c(
+        "buone condizioni /vivibile",
+        "ottime condizioni /ristrutturato",
+        "da ristrutturare",
+        "nuova costruzione",
+        "altro"
+      )),
+      piano = factor(input$piano, levels = as.character(1:15)),
+      riscaldamento.centralizzato = factor(input$riscaldamento.centralizzato, levels = c("centralizzato", "autonomo", "nessuno")),
+      classe.di.efficienza.energetica = factor(input$classe.di.efficienza.energetica, levels = as.character(1:8)),
+      terrazza = factor(input$terrazza, levels = c("0","1")),
+      fibra = factor(input$fibra, levels = c("0","1")),
+      porta_sicurezza = factor(input$porta_sicurezza, levels = c("0","1")),
+      piscina = factor(input$piscina, levels = c("0","1")),
+      Latitudine = as.numeric(input$Latitudine),
+      Longitudine = as.numeric(input$Longitudine)
+    )
+    
+    pred <- predict(modello_rf, newdata)$predictions
+    return(pred)
+  })
+  
+  output$prezzo_predetto <- renderText({
+    req(predizione())
+    paste0("Prezzo stimato: € ", format(round(predizione()), big.mark = ".", decimal.mark = ","))
+  })
+  
+  output$mappaMilano <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
+      setView(lng = 9.19, lat = 45.4642, zoom = 13) %>%
+      addMarkers(lng = c(9.191, 9.1899, 9.19124, 9.19533, 9.13046),
+                 lat = c(45.4641, 45.44857, 45.47124, 45.47772, 45.47894),
+                 popup = c("Duomo", "Bocconi", "Brera", "Porta Nuova", "San Siro")) %>%
+      addMarkers(lng = input$Longitudine, lat = input$Latitudine, layerId = "posizione_utente", 
+                 popup = "Posizione selezionata")
+  })
+  
+  observe({
+    leafletProxy("mappaMilano") %>%
+      removeMarker("posizione_utente") %>%
+      addMarkers(lng = input$Longitudine, lat = input$Latitudine, layerId = "posizione_utente",
+                 popup = "Posizione selezionata")
+  })
+  
+}
+
+shinyApp(ui, server)
